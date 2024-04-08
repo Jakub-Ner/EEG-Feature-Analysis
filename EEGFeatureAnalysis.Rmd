@@ -1,0 +1,166 @@
+---
+title: "EEG Feature Analysis"
+output: html_notebook
+---
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter.*
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+## Introduction
+
+To prepare EEG analysis we utilized (Utilities for Electroencephalographic (EEG) Analysis • eegUtils (craddm.github.io).
+
+We analyze [eeg datasets](https://github.com/jordan-bird/eeg-feature-generation/tree/master) from ["A Study on Mental State Classification using EEG-based Brain-Machine Interface"](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8710576)
+
+## Analysis preparation
+
+We install, import dependencies, set const values and import datasets:
+
+```{r}
+remotes::install_github("craddm/eegUtils")
+library(ggplot2)
+library(eegUtils)
+library(readxl)
+library(tibble)
+
+options(digits=15) # show whole numbers
+
+# CONSTS
+SAMPLING_RATE <- 250
+
+
+a_concentrating_1_init <- read.csv("./dataset//subjecta-concentrating-1.csv")
+a_concentrating_2_init <- read.csv("./dataset//subjecta-concentrating-2.csv")
+a_neutral_1_init <- read.csv("./dataset//subjecta-neutral-1.csv")
+a_neutral_2_init <- read.csv("./dataset//subjecta-neutral-2.csv")
+a_relaxed_1_init <- read.csv("./dataset//subjecta-relaxed-1.csv")
+a_relaxed_2_init <- read.csv("./dataset//subjecta-relaxed-2.csv")
+
+```
+
+```{r}
+a_concentrating_1_init
+```
+
+## Pre-processing
+
+Firstly we drop first and last 4 seconds of recordings, because it takes time for a subject to obtain a state (concentration, neutral, relaxation).
+
+```{r}
+ROWS_TO_DROP <- 4 * SAMPLING_RATE
+drop <- function(dataset) {
+  dataset <- dataset[-c(1:ROWS_TO_DROP, (nrow(dataset) - ROWS_TO_DROP + 1):nrow(dataset)), ]
+  return(dataset)
+}
+
+a_concentrating_1 <- drop(a_concentrating_1_init)
+a_concentrating_2 <- drop(a_concentrating_2_init)
+a_neutral_1 <- drop(a_neutral_1_init)
+a_neutral_2 <- drop(a_neutral_2_init)
+a_relaxed_1 <- drop(a_relaxed_1_init)
+a_relaxed_2 <- drop(a_relaxed_2_init)
+```
+
+In the experiment Right.AUX was used for calibration purposes. More specifically as NZ. That's why we rename the mentioned column
+
+```{r}
+rename_to_NZ <- function(dataset){
+  names(dataset)[names(dataset) == "Right.AUX"] <- "NZ"
+  return(dataset)
+} 
+
+
+a_concentrating_1 <- rename_to_NZ(a_concentrating_1)
+a_concentrating_2 <- rename_to_NZ(a_concentrating_2)
+a_neutral_1 <- rename_to_NZ(a_neutral_1)
+a_neutral_2 <- rename_to_NZ(a_neutral_2)
+a_relaxed_1 <- rename_to_NZ(a_relaxed_1)
+a_relaxed_2 <- rename_to_NZ(a_relaxed_2)
+
+a_concentrating_1
+```
+
+To make analysis easier we wrap our dataframes with eeg_epochs
+
+```{r}
+wrap <- function(dataset) return(eeg_epochs(
+  dataset[,-1], 
+  srate = SAMPLING_RATE, 
+  epochs=tibble(epoch=c(1)), 
+  timings=data.frame(time=seq(1, nrow(dataset)), epoch=rep(1, nrow(dataset)))
+  )
+)
+
+a_concentrating_1_obj <- wrap(a_concentrating_1)
+a_concentrating_2_obj <- wrap(a_concentrating_2)
+a_neutral_1_obj <- wrap(a_neutral_1)
+a_neutral_2_obj <- wrap(a_neutral_2)
+a_relaxed_1_obj <- wrap(a_relaxed_1)
+a_relaxed_2_obj <- wrap(a_relaxed_2)
+
+a_concentrating_1_obj
+```
+
+In order to remove artifacts we apply bandpass filter. High-pass filter at 1 Hz removes muscle activity, blinking. Low-pass filter at 100 Hz drops electrical interference and environmental artifacts. Ideally we would use also notch-filter to remove electrical frequency (50 Hz in UK), but the library doesn't support this operation.
+
+```{r message=FALSE}
+
+apply_filter <- function(eeg_obj) return(
+  eeg_filter(a_concentrating_1_obj,
+                          method = "iir",
+                          low_freq = 1,
+                          high_freq = 100)
+)
+
+a_concentrating_1 <- apply_filter(a_concentrating_1_obj)
+a_concentrating_2 <- apply_filter(a_concentrating_2_obj)
+a_neutral_1 <- apply_filter(a_neutral_1_obj)
+a_neutral_2 <- apply_filter(a_neutral_2_obj)
+a_relaxed_1 <- apply_filter(a_relaxed_1_obj)
+a_relaxed_2 <- apply_filter(a_relaxed_2_obj)
+```
+
+## Analysis
+
+In order to analyse Brain-Computer-Interface data, we need to utilize simplifications, due to low spatial resolution and noise sensitivity. We leverage left-brain, right-brain dominance theory (Corballis, 2014; Joseph, 1988).
+
+```{r}
+
+```
+
+Below we visualize placement of **TP9 (**temporal-parietal) **AF7 (**auricular-frontal**) AF8 TP10 NZ** electrodes on the subjects heads with averaged signals around the area. Blue areas suggest decreased activity, while red increased.
+
+```{r message=FALSE, warning=FALSE}
+show_topplot <- function(eeg_obj, plot_title) {
+  electrodes <- electrode_locations(eeg_obj)
+  return (topoplot(electrodes, chan_marker = "name") + ggtitle(plot_title))
+}
+
+
+show_topplot(a_concentrating_1_obj, "A - concentraitng - 1")
+show_topplot(a_concentrating_2_obj, "A - concentraitng - 2")
+show_topplot(a_neutral_1_obj, "A - neutral - 1")
+show_topplot(a_neutral_2_obj, "A - neutral - 2")
+show_topplot(a_relaxed_1_obj, "A - relaxed - 1")
+show_topplot(a_relaxed_2_obj, "A - relaxed - 2")
+```
+
+### Power spectral density (using Welch's method)
+
+```{r message=FALSE, warning=FALSE}
+show_psd <- function(eeg_obj, title) {
+  return (plot_psd(eeg_obj) + ggtitle(title))
+}
+
+show_psd(a_concentrating_1_obj, "A - concentraitng - 1")
+show_psd(a_concentrating_2_obj, "A - concentraitng - 2")
+show_psd(a_neutral_1_obj, "A - neutral - 1")
+show_psd(a_neutral_2_obj, "A - neutral - 2")
+show_psd(a_relaxed_1_obj, "A - relaxed - 1")
+show_psd(a_relaxed_2_obj, "A - relaxed - 2")
+```
